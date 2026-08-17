@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace BladeContact
+namespace BladeContact.Prototype
 {
     public enum BladeSweepStatus : byte
     {

@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace BladeContact
+namespace BladeContact.Prototype
 {
     /// <summary>
     /// One authored contact feature on a <see cref="BladeShell"/>: a local-space spine segment with a

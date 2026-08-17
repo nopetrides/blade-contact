@@ -1,10 +1,14 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace BladeContact.Tests
+
+namespace BladeContact.Prototype.Tests
 {
     /// <summary>
-    /// L1 — angular contact. The rig is a rotation-dominant tunnelling case: a rod pivots through a
+    /// ARCHIVED PROTOTYPE. Disposable proof that endpoint-only checks miss rotation; superseded by
+    /// BladeShellSweepTests, which runs the same question against real authored blade geometry. Kept
+    /// because it is the smallest reproduction of the tunnelling problem, NOT as production behaviour.
+    /// The rig is a rotation-dominant tunnelling case: a rod pivots through a
     /// stationary post while both endpoint poses are far apart, so any endpoint-only test misses the
     /// contact entirely. Analytic contact geometry for the rig is derived in <see cref="AnalyticSeparation"/>.
     /// </summary>

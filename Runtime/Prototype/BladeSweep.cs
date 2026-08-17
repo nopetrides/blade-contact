@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace BladeContact
+namespace BladeContact.Prototype
 {
     /// <summary>
     /// Continuous first-contact search between two registered blade shells, by conservative advancement.
