@@ -11,7 +11,18 @@ namespace BladeContact
         Contact,
 
         /// <summary>Advancement did not converge within the iteration ceiling; motion is still blocked.</summary>
-        IterationLimit
+        IterationLimit,
+
+        /// <summary>
+        /// The query hit its diagnostic work or time ceiling and was abandoned.
+        /// </summary>
+        /// <remarks>
+        /// This is NOT a contact result. Whatever the traversal had found so far is discarded, because a
+        /// partially explored hierarchy can miss the true closest pair entirely and reporting it as a
+        /// contact would be worse than reporting nothing. Callers must check
+        /// <see cref="BladeShellContact.IsValid"/> and must not consume the pair or the time of impact.
+        /// </remarks>
+        BudgetExceeded
     }
 
     /// <summary>
@@ -72,7 +83,16 @@ namespace BladeContact
             Iterations = iterations;
         }
 
+        /// <summary>
+        /// False only when the query was abandoned. An invalid result carries no usable contact data and
+        /// must never be consumed as though the shells had been fully examined.
+        /// </summary>
+        public bool IsValid => Status != BladeContactStatus.BudgetExceeded;
+
         /// <summary>True when the requested motion must not be accepted in full.</summary>
-        public bool BlocksMotion => Status != BladeContactStatus.NoContact;
+        public bool BlocksMotion => Status == BladeContactStatus.Contact || Status == BladeContactStatus.IterationLimit;
+
+        public static BladeShellContact Abandoned(int iterations) =>
+            new BladeShellContact(BladeContactStatus.BudgetExceeded, 0f, BladeFeaturePair.None, iterations);
     }
 }

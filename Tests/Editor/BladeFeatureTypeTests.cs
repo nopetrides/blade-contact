@@ -5,9 +5,9 @@ namespace BladeContact.Tests
     public sealed class BladeFeatureTypeTests
     {
         [Test]
-        public void SharpEdge_IsDistinctFromBluntEdge()
+        public void SharpEdge_IsDistinctFromProfileFeatureEdge()
         {
-            Assert.AreNotEqual(BladeFeatureType.SharpEdge, BladeFeatureType.BluntEdge);
+            Assert.AreNotEqual(BladeFeatureType.SharpEdge, BladeFeatureType.ProfileFeatureEdge);
         }
     }
 }

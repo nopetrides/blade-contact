@@ -100,7 +100,34 @@ namespace BladeContact
             }
 
             LocalExtent = extent;
+
+            // Shell-level bounding sphere, for the pair-level broad phase.
+            Vector3 centre = Vector3.zero;
+            int total = surfaces.Length + edges.Length;
+            foreach (BladeSurface s in surfaces) centre += s.LocalCentre;
+            foreach (BladeEdgeLine e in edges) centre += e.LocalCentre;
+            if (total > 0) centre /= total;
+
+            float bound = 0f;
+            foreach (BladeSurface s in surfaces)
+                bound = Mathf.Max(bound, (s.LocalCentre - centre).magnitude + s.LocalBoundingRadius);
+            foreach (BladeEdgeLine e in edges)
+                bound = Mathf.Max(bound, (e.LocalCentre - centre).magnitude + e.LocalBoundingRadius);
+
+            BoundingCentre = centre;
+            BoundingRadius = bound;
         }
+
+        private BladeShellBvh bvh;
+
+        /// <summary>Acceleration structure over the authored features, built once on first use.</summary>
+        public BladeShellBvh Bvh => bvh ?? (bvh = new BladeShellBvh(this));
+
+        /// <summary>Centre of the shell's bounding sphere, in local space.</summary>
+        public Vector3 BoundingCentre { get; }
+
+        /// <summary>Radius of the shell's bounding sphere about <see cref="BoundingCentre"/>.</summary>
+        public float BoundingRadius { get; }
 
         /// <summary>Bounds every feature in one group, so a group pair can be rejected as a unit.</summary>
         private static BladeShellGroup[] BuildSingleGroup(BladeSurface[] surfaces, BladeEdgeLine[] edges)

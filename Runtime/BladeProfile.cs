@@ -113,12 +113,4 @@ namespace BladeContact
         }
     }
 
-    /// <summary>Project asset wrapper so a consumer can author and version a profile outside code.</summary>
-    [CreateAssetMenu(menuName = "Blade Contact/Blade Profile", fileName = "BladeProfile")]
-    public sealed class BladeProfileAsset : ScriptableObject
-    {
-        [SerializeField] private BladeProfile profile = new BladeProfile();
-
-        public BladeProfile Profile => profile;
-    }
 }

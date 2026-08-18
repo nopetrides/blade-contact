@@ -111,7 +111,7 @@ namespace BladeContact.Tests
             {
                 BladeFeatureType type = shell.GetEdge(i).Type;
                 if (type == BladeFeatureType.SharpEdge) sharp++;
-                if (type == BladeFeatureType.BluntEdge) blunt++;
+                if (type == BladeFeatureType.ProfileFeatureEdge) blunt++;
             }
 
             // Two designated edges per station interval; the other ten ridges stay undesignated.

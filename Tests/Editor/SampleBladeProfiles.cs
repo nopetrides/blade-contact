@@ -24,13 +24,13 @@ namespace BladeContact.Tests
             new BladeProfileVertex(across, through, BladeFeatureType.SharpEdge, BladeFeatureType.BevelFace);
 
         private static BladeProfileVertex Bevel(float across, float through) =>
-            new BladeProfileVertex(across, through, BladeFeatureType.BluntEdge, BladeFeatureType.BroadFace);
+            new BladeProfileVertex(across, through, BladeFeatureType.ProfileFeatureEdge, BladeFeatureType.BroadFace);
 
         private static BladeProfileVertex Broad(float across, float through) =>
-            new BladeProfileVertex(across, through, BladeFeatureType.BluntEdge, BladeFeatureType.BroadFace);
+            new BladeProfileVertex(across, through, BladeFeatureType.ProfileFeatureEdge, BladeFeatureType.BroadFace);
 
         private static BladeProfileVertex BroadToBevel(float across, float through) =>
-            new BladeProfileVertex(across, through, BladeFeatureType.BluntEdge, BladeFeatureType.BevelFace);
+            new BladeProfileVertex(across, through, BladeFeatureType.ProfileFeatureEdge, BladeFeatureType.BevelFace);
 
         /// <summary>One 12-vertex cross-section ring. Vertex 0 and 6 are the two designated sharp edges.</summary>
         private static BladeProfileStation Station(
