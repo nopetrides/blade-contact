@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace BladeContact
@@ -23,8 +25,62 @@ namespace BladeContact
 
         private BladeShellData cachedData;
 
+        private Rigidbody proxyBody;
+        private Transform proxyTransform;
+        private readonly List<Collider> proxyColliders = new List<Collider>();
+        private bool proxyBound;
+
+        /// <summary>
+        /// Raised whenever the shapes and body that carry this blade in the simulation change.
+        /// </summary>
+        /// <remarks>
+        /// Anything that keeps a collider-to-blade map has to rebuild it here. A map built at enable is
+        /// stale the moment the blade is picked up by something that re-hosts its physics.
+        /// </remarks>
+        public event Action<BladeShell> PhysicsBindingChanged;
+
         /// <summary>The dynamic body receiving custom sword-to-sword response.</summary>
+        /// <remarks>
+        /// The AUTHORED body. When something else is currently hosting this blade's physics, the body that
+        /// actually carries it is <see cref="ActiveBody"/>, and that is the one a response must be applied
+        /// to. Applying to a body that has been made kinematic does nothing at all, silently.
+        /// </remarks>
         public Rigidbody Body => body;
+
+        /// <summary>
+        /// The body that carries this blade in the simulation right now.
+        /// </summary>
+        public Rigidbody ActiveBody => proxyBound && proxyBody != null ? proxyBody : body;
+
+        /// <summary>
+        /// The transform the authored local geometry is currently expressed against.
+        /// </summary>
+        /// <remarks>
+        /// A proxy is a rigid copy of this blade's collider hierarchy, so the same authored local geometry
+        /// is valid against it. Using the authored transform while the proxy is what PhysX moves would put
+        /// the shell query one host behind the contact it is meant to describe.
+        /// </remarks>
+        public Transform ActiveTransform => proxyBound && proxyTransform != null ? proxyTransform : transform;
+
+        /// <summary>True while another host is carrying this blade's physics.</summary>
+        public bool HasPhysicsProxy => proxyBound;
+
+        /// <summary>
+        /// Every collider that counts as THIS BLADE right now, authored or proxied.
+        /// </summary>
+        public IReadOnlyList<Collider> ActiveColliders
+        {
+            get
+            {
+                if (proxyBound) return proxyColliders;
+
+                singleCollider.Clear();
+                if (bladeCollider != null) singleCollider.Add(bladeCollider);
+                return singleCollider;
+            }
+        }
+
+        private readonly List<Collider> singleCollider = new List<Collider>(1);
 
         /// <summary>Built surfaces and edge lines for this shell, constructed once and reused.</summary>
         public BladeShellData Data =>
@@ -43,7 +99,66 @@ namespace BladeContact
         public Collider BladeCollider => bladeCollider;
 
         /// <summary>Current world pose of this shell's local geometry.</summary>
-        public BladePose CurrentPose => new BladePose(transform.position, transform.rotation);
+        public BladePose CurrentPose
+        {
+            get
+            {
+                Transform t = ActiveTransform;
+                return new BladePose(t.position, t.rotation);
+            }
+        }
+
+        /// <summary>
+        /// Declares the body and shapes that are carrying this blade's physics instead of the authored
+        /// ones, for as long as that is true.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A blade does not always collide through the collider it was authored with. Attachment systems
+        /// commonly make the source object kinematic, switch its colliders off, and rebuild an equivalent
+        /// rigid copy on the body that is going to carry it. Contacts then arrive on shapes this component
+        /// has never heard of, and every consumer that resolves a contact back to a blade silently stops
+        /// matching. Nothing errors; the blade simply behaves as ordinary physics.
+        /// </para>
+        /// <para>
+        /// This is deliberately a declaration made from OUTSIDE. The package cannot know which attachment
+        /// system a project uses, and guessing — by name, by mesh, by proximity — would be a rule that is
+        /// wrong somewhere. The consumer that owns the attachment knows the answer exactly.
+        /// </para>
+        /// <para>
+        /// Only shapes that are this BLADE belong here. A guard, grip or pommel copy passed in would make
+        /// a hilt contact classify as a blade contact.
+        /// </para>
+        /// </remarks>
+        public void BindPhysicsProxy(Rigidbody proxy, Transform pose, IReadOnlyList<Collider> colliders)
+        {
+            proxyBody = proxy;
+            proxyTransform = pose != null ? pose : (proxy != null ? proxy.transform : null);
+
+            proxyColliders.Clear();
+            if (colliders != null)
+                for (int i = 0; i < colliders.Count; i++)
+                    if (colliders[i] != null) proxyColliders.Add(colliders[i]);
+
+            proxyBound = proxyColliders.Count > 0 || proxyBody != null;
+
+            Action<BladeShell> changed = PhysicsBindingChanged;
+            if (changed != null) changed(this);
+        }
+
+        /// <summary>Returns this blade to its authored body and collider.</summary>
+        public void UnbindPhysicsProxy()
+        {
+            if (!proxyBound) return;
+
+            proxyBound = false;
+            proxyBody = null;
+            proxyTransform = null;
+            proxyColliders.Clear();
+
+            Action<BladeShell> changed = PhysicsBindingChanged;
+            if (changed != null) changed(this);
+        }
 
         /// <summary>Reusable world-space buffers, so a per-step sweep does not allocate.</summary>
         public BladeShellScratch Scratch { get; } = new BladeShellScratch();
