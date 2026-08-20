@@ -236,7 +236,14 @@ namespace BladeContact
         /// the boundary of its adjoining surfaces, so the two genuinely coincide; the tie is broken toward
         /// the edge because it is the more specific description of the same contact.
         /// </summary>
-        private const float SpecificityTieBand = 1e-6f;
+        /// <remarks>
+        ///     <b>Public so a measurement run can record it, and a COMPILE-TIME constant, not a runtime
+        ///     parameter.</b> It cannot be varied from the inspector or by a runner, so any pass that
+        ///     characterises the classifier's sensitivity to it requires a code change and its own build
+        ///     identity. Preflight records this value beside the module version so a row can never be
+        ///     attributed to the wrong tie band.
+        /// </remarks>
+        public const float SpecificityTieBand = 1e-6f;
 
         /// <summary>How often the wall-clock budget is checked, in node-pair pops.</summary>
         private const int TimeCheckInterval = 512;

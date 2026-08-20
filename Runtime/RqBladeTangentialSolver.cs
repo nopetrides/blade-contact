@@ -102,7 +102,33 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         public string ContactMaterialB;
 
         public int ContactCount;
+        /// <summary>
+        ///     The step this pair's TANGENTIAL SOLVE last ran. This is a solve timestamp and says nothing
+        ///     about how old the CLASSIFICATION is: the solve runs every step a contact is reported, while
+        ///     the classifier runs on its own interval. Reading this as classification freshness is wrong,
+        ///     and did mislead one measurement pass. Use <see cref="ClassifyAttemptedAtStep" /> and
+        ///     <see cref="ClassWrittenAtStep" /> for that.
+        /// </summary>
         public int LastSolvedStep;
+
+        /// <summary>
+        ///     The step the classifier was last INVOKED on this pair, whether or not it produced a usable
+        ///     witness. Gated by <c>classificationInterval</c>, so consecutive steps normally share a value.
+        /// </summary>
+        public int ClassifyAttemptedAtStep;
+
+        /// <summary>
+        ///     The step a classification was last successfully WRITTEN for this pair, i.e. a usable witness
+        ///     was found and the feature identities and scenario were replaced.
+        /// </summary>
+        /// <remarks>
+        ///     When an attempt runs out of budget or yields no valid witness the pair KEEPS its previous
+        ///     class and this value does not move, so <c>ClassifyAttemptedAtStep</c> being newer than this
+        ///     is exactly the signature of a stale class being carried forward. The difference between this
+        ///     and the reading step is the real age of the attribution, and it is the number a measurement
+        ///     must quote rather than <see cref="LastSolvedStep" />.
+        /// </remarks>
+        public int ClassWrittenAtStep;
 
         /// <summary>Steps since this relationship was first seen in which PhysX reported it touching.</summary>
         public int TouchedSteps;
@@ -440,6 +466,10 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         if (step >= pair.NextClassifyStep)
         {
             pair.NextClassifyStep = step + classificationInterval;
+
+            // Recorded whether or not the attempt yields a usable witness. An attempt that fails leaves
+            // ClassWrittenAtStep behind, which is what makes a carried-forward class visible as stale.
+            pair.Readout.ClassifyAttemptedAtStep = step;
             Classify(key, pair, clock);
         }
 
@@ -604,6 +634,11 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         pair.Readout.RegionB = BladeContactScenarios.RegionOf(typeB);
         pair.Readout.Scenario = BladeContactScenarios.Classify(typeA, typeB);
         pair.Readout.ClassificationValid = true;
+
+        // Only reached when a usable witness replaced the feature identities above. An attempt that
+        // returned early left this behind, so (readingStep - ClassWrittenAtStep) is the attribution's
+        // true age.
+        pair.Readout.ClassWrittenAtStep = step;
         pair.Readout.ShellSeparation = witness.Separation;
 
         // Against the transform the shell query was posed with, which is the body actually carrying the
