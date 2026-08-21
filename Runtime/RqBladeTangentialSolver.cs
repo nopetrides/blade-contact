@@ -61,6 +61,21 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         public string RawIdA;
         public string RawIdB;
 
+        /// <summary>
+        ///     The features this classification actually selected, as references into each side's
+        ///     <see cref="BladeShellData" />.
+        /// </summary>
+        /// <remarks>
+        ///     Published so a consumer can read back the ATTRIBUTED geometry itself -- the authored edge's
+        ///     own two vertices, or the facet's own triangle -- rather than reconstructing it by parsing
+        ///     <see cref="RawIdA" />. A diagnostic that draws the attribution has to draw what was selected;
+        ///     if it instead draws a feature it chose by its own rule, it demonstrates nothing about what
+        ///     the classifier did. Valid only while <see cref="ClassificationValid" /> is true.
+        /// </remarks>
+        public BladeFeatureRef FeatureA;
+
+        public BladeFeatureRef FeatureB;
+
         // SEMANTIC layer -- derived from authored designation only.
         public BladeSemanticRegion RegionA;
         public BladeSemanticRegion RegionB;
@@ -671,6 +686,8 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         pair.Readout.RawTypeB = typeB;
         pair.Readout.RawIdA = pair.A.Data.IdOf(witness.FeatureA);
         pair.Readout.RawIdB = pair.B.Data.IdOf(witness.FeatureB);
+        pair.Readout.FeatureA = witness.FeatureA;
+        pair.Readout.FeatureB = witness.FeatureB;
         pair.Readout.RegionA = BladeContactScenarios.RegionOf(typeA);
         pair.Readout.RegionB = BladeContactScenarios.RegionOf(typeB);
         pair.Readout.Scenario = BladeContactScenarios.Classify(typeA, typeB);
