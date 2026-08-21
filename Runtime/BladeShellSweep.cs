@@ -504,6 +504,31 @@ namespace BladeContact
             BladeShellScratch scratch, BladeContactStats stats, Stopwatch clock,
             out BladeFeaturePair pair)
         {
+            return TryClosestFeaturePair(
+                shellA, poseA, shellB, poseB, settings, scratch, stats, clock, null, out pair);
+        }
+
+        /// <summary>
+        /// As <see cref="TryClosestFeaturePair(BladeShellData,in BladePose,BladeShellData,in BladePose,in BladeSweepSettings,BladeShellScratch,BladeContactStats,Stopwatch,out BladeFeaturePair)" />,
+        /// additionally recording into <paramref name="trace" /> which candidates were measured, which were
+        /// discarded unmeasured, and which rule selected the winner.
+        /// </summary>
+        /// <remarks>
+        /// A null <paramref name="trace" /> is the production path and costs nothing. When non-null the
+        /// recording is append-only into a pre-sized buffer and never read back, so it cannot change which
+        /// pair is selected. It does consume wall time inside the query, which is checked against
+        /// <see cref="BladeSweepSettings.DiagnosticTimeBudgetMs" /> — so a traced query is marginally more
+        /// likely to abort than an untraced one, and <see cref="BladeClassificationTrace.Completion" />
+        /// records that rather than hiding it.
+        /// </remarks>
+        public static bool TryClosestFeaturePair(
+            BladeShellData shellA, in BladePose poseA,
+            BladeShellData shellB, in BladePose poseB,
+            in BladeSweepSettings settings,
+            BladeShellScratch scratch, BladeContactStats stats, Stopwatch clock,
+            BladeClassificationTrace trace,
+            out BladeFeaturePair pair)
+        {
             BladeShellBvh bvhA = shellA.Bvh;
             BladeShellBvh bvhB = shellB.Bvh;
 
@@ -520,17 +545,33 @@ namespace BladeContact
             scratch.CacheA.Begin(shellA);
             scratch.CacheB.Begin(shellB);
 
+            if (trace != null)
+            {
+                // Captured BEFORE the warm start consumes them, because TryWarmStart's own bookkeeping
+                // overwrites scratch.WarmFeature* at the end of the query.
+                trace.WarmFeatureA = scratch.WarmFeatureA;
+                trace.WarmFeatureB = scratch.WarmFeatureB;
+                trace.SurfaceCountA = shellA.SurfaceCount;
+                trace.SurfaceCountB = shellB.SurfaceCount;
+                trace.ShellA = shellA;
+                trace.ShellB = shellB;
+                trace.PoseA = poseA;
+                trace.PoseB = poseB;
+            }
+
             // Seed a FINITE bound before traversing. Without it the first descent has nothing to prune
             // against and can expand across the whole hierarchy. The previous query's winner is tried
             // first because consecutive iterates barely move; failing that, descend greedily as before.
             bool warmed = TryWarmStart(
                 shellA, poseA, bvhA, shellB, poseB, bvhB, scratch,
-                ref best, ref bestSpecificity, ref bestPair, stats);
+                ref best, ref bestSpecificity, ref bestPair, stats, trace);
+
+            if (trace != null) trace.WarmStartUsed = warmed;
 
             if (!warmed)
             {
                 SeedBest(shellA, poseA, bvhA, shellB, poseB, bvhB, scratch, basis,
-                    ref best, ref bestSpecificity, ref bestPair, stats);
+                    ref best, ref bestSpecificity, ref bestPair, stats, trace);
             }
 
             int warmFeatureA = scratch.WarmFeatureA;
@@ -555,6 +596,12 @@ namespace BladeContact
                 if (settings.MaxNodePairVisits > 0 && visits > settings.MaxNodePairVisits)
                 {
                     PublishCacheCounters(scratch, stats);
+                    if (trace != null)
+                    {
+                        trace.NodePairsVisited = visits;
+                        trace.Completion = BladeQueryCompletion.AbortedNodeVisits;
+                    }
+
                     pair = BladeFeaturePair.None;
                     return false;
                 }
@@ -564,6 +611,12 @@ namespace BladeContact
                     clock.Elapsed.TotalMilliseconds > settings.DiagnosticTimeBudgetMs)
                 {
                     PublishCacheCounters(scratch, stats);
+                    if (trace != null)
+                    {
+                        trace.NodePairsVisited = visits;
+                        trace.Completion = BladeQueryCompletion.AbortedTimeBudget;
+                    }
+
                     pair = BladeFeaturePair.None;
                     return false;
                 }
@@ -578,7 +631,8 @@ namespace BladeContact
                 {
                     if (stats != null) stats.LeafPairsVisited++;
                     TestLeaves(shellA, poseA, bvhA, na, shellB, poseB, bvhB, nb, scratch,
-                        ref best, ref bestSpecificity, ref bestPair, stats);
+                        ref best, ref bestSpecificity, ref bestPair, stats, trace,
+                        BladeCandidateSource.Leaf);
                     continue;
                 }
 
@@ -601,13 +655,28 @@ namespace BladeContact
                 int keptA = FeatureSlot(shellA, bestPair.FeatureA);
                 int keptB = FeatureSlot(shellB, bestPair.FeatureB);
 
-                if (stats != null && warmed && keptA == warmFeatureA && keptB == warmFeatureB)
-                    stats.WarmStartsKept++;
+                bool kept = warmed && keptA == warmFeatureA && keptB == warmFeatureB;
+                if (stats != null && kept) stats.WarmStartsKept++;
+
+                // The sweep's own slot arithmetic, so a consumer never has to reconstruct it from a ref
+                // index — which would be wrong for edges, whose slots are offset by the surface count.
+                if (trace != null) trace.WarmStartKept = kept;
 
                 scratch.WarmShellA = shellA;
                 scratch.WarmShellB = shellB;
                 scratch.WarmFeatureA = keptA;
                 scratch.WarmFeatureB = keptB;
+            }
+
+            if (trace != null)
+            {
+                trace.NodePairsVisited = visits;
+                trace.Final = bestPair;
+                trace.FinalBestScalar = best;
+                trace.FinalSpecificity = bestSpecificity;
+
+                // Written here and nowhere else, so only a query that reached this line reads as completed.
+                trace.Completion = BladeQueryCompletion.Completed;
             }
 
             pair = bestPair;
@@ -634,7 +703,8 @@ namespace BladeContact
             BladeShellData shellA, in BladePose poseA, BladeShellBvh bvhA,
             BladeShellData shellB, in BladePose poseB, BladeShellBvh bvhB,
             BladeShellScratch scratch,
-            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats)
+            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats,
+            BladeClassificationTrace trace)
         {
             if (scratch.WarmFeatureA < 0 || scratch.WarmFeatureB < 0) return false;
             if (!ReferenceEquals(scratch.WarmShellA, shellA)) return false;
@@ -701,7 +771,8 @@ namespace BladeContact
             BladeFeatureRef refB = new BladeFeatureRef(
                 bIsSurface ? BladeFeatureKind.Surface : BladeFeatureKind.Edge, indexB);
 
-            Consider(d, specificity, refA, refB, wa, wb, ref best, ref bestSpecificity, ref bestPair);
+            Consider(d, specificity, refA, refB, wa, wb, ref best, ref bestSpecificity, ref bestPair,
+                trace, BladeCandidateSource.WarmStart);
             return true;
         }
 
@@ -760,7 +831,8 @@ namespace BladeContact
             BladeShellData shellA, in BladePose poseA, BladeShellBvh bvhA,
             BladeShellData shellB, in BladePose poseB, BladeShellBvh bvhB, BladeShellScratch scratch,
             in BladeObbBasis basis,
-            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats)
+            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats,
+            BladeClassificationTrace trace)
         {
             int ia = 0, ib = 0;
             for (int guard = 0; guard < 256; guard++)
@@ -779,7 +851,8 @@ namespace BladeContact
                     }
 
                     TestLeaves(shellA, poseA, bvhA, na, shellB, poseB, bvhB, nb, scratch,
-                        ref best, ref bestSpecificity, ref bestPair, stats);
+                        ref best, ref bestSpecificity, ref bestPair, stats, trace,
+                        BladeCandidateSource.Seed);
                     return;
                 }
 
@@ -812,7 +885,8 @@ namespace BladeContact
             BladeShellData shellA, in BladePose poseA, BladeShellBvh bvhA, in BladeShellBvh.Node na,
             BladeShellData shellB, in BladePose poseB, BladeShellBvh bvhB, in BladeShellBvh.Node nb,
             BladeShellScratch scratch,
-            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats)
+            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair, BladeContactStats stats,
+            BladeClassificationTrace trace, BladeCandidateSource source)
         {
             bool timed = stats != null;
             long mark;
@@ -849,6 +923,21 @@ namespace BladeContact
                     if (reach < float.MaxValue && (centreA - centreB).sqrMagnitude > reach * reach)
                     {
                         if (timed) stats.FeaturePairsCulled++;
+
+                        // Recorded so a candidate's absence from the trace means "pruned at the HIERARCHY,
+                        // never reached this leaf" and nothing else. The distance is the sphere-gap lower
+                        // bound the cull actually tested, not a measurement of the pair.
+                        if (trace != null)
+                        {
+                            trace.Add(
+                                source, BladeCandidateOutcome.SphereCulled,
+                                refA,
+                                new BladeFeatureRef(
+                                    bIsSurface ? BladeFeatureKind.Surface : BladeFeatureKind.Edge, indexB),
+                                (centreA - centreB).magnitude - radiusA - radiusB, false, -1,
+                                best, bestSpecificity, Vector3.zero, Vector3.zero);
+                        }
+
                         continue;
                     }
 
@@ -896,7 +985,8 @@ namespace BladeContact
 
                     if (timed) stats.DistanceMs += Ticks(mark);
 
-                    Consider(d, specificity, refA, refB, wa, wb, ref best, ref bestSpecificity, ref bestPair);
+                    Consider(d, specificity, refA, refB, wa, wb, ref best, ref bestSpecificity, ref bestPair,
+                        trace, source);
                 }
             }
         }
@@ -925,10 +1015,27 @@ namespace BladeContact
             float separation, int specificity,
             BladeFeatureRef featureA, BladeFeatureRef featureB,
             Vector3 witnessA, Vector3 witnessB,
-            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair)
+            ref float best, ref int bestSpecificity, ref BladeFeaturePair bestPair,
+            BladeClassificationTrace trace, BladeCandidateSource source)
         {
             bool closer = separation < best - SpecificityTieBand;
             bool tiedButMoreSpecific = separation < best + SpecificityTieBand && specificity > bestSpecificity;
+
+            // Recorded against the incumbent AS IT STOOD, before either is updated below, so the trace
+            // shows the comparison the rule actually made rather than its aftermath.
+            if (trace != null)
+            {
+                trace.Add(
+                    source,
+                    closer
+                        ? BladeCandidateOutcome.TookAsCloser
+                        : tiedButMoreSpecific
+                            ? BladeCandidateOutcome.TookAsTiedMoreSpecific
+                            : BladeCandidateOutcome.RejectedNotCloser,
+                    featureA, featureB, separation, true, specificity,
+                    best, bestSpecificity, witnessA, witnessB);
+            }
+
             if (!closer && !tiedButMoreSpecific) return;
 
             if (separation < best) best = separation;

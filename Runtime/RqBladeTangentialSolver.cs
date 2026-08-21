@@ -243,6 +243,33 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
 
     private int step;
 
+    private BladeClassificationTrace liveTrace;
+
+    /// <summary>
+    /// Opt-in capture of what each fresh classification query actually computed. OFF by default and never
+    /// serialized, so a measurement run cannot inherit it from a prefab.
+    /// </summary>
+    /// <remarks>
+    /// The capture is append-only and is never read back by the solver, so it cannot change which feature
+    /// pair is selected. It does spend time inside the query, which counts against
+    /// <see cref="BladeSweepSettings.DiagnosticTimeBudgetMs" /> — that is why
+    /// <see cref="BladeClassificationTrace.Completion" /> is recorded rather than assumed.
+    /// </remarks>
+    public bool TraceClassifications { get; set; }
+
+    /// <summary>
+    /// The most recent traced query. Reused between classifications, so a consumer must
+    /// <see cref="BladeClassificationTrace.Clone" /> anything it intends to keep.
+    /// </summary>
+    public BladeClassificationTrace LastClassificationTrace { get { return liveTrace; } }
+
+    /// <summary>
+    /// Fixed step the trace in <see cref="LastClassificationTrace" /> belongs to, or -1. Watch this for
+    /// change rather than polling the trace, so a consumer can never read the same capture twice or read a
+    /// half-written one.
+    /// </summary>
+    public int LastClassificationTraceStep { get; private set; } = -1;
+
     /// <summary>Whether the semantic layer is currently adding anything at all.</summary>
     public bool ApplyTangentialBehaviour
     {
@@ -611,15 +638,29 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         BladePose poseA = pair.A.Pose;
         BladePose poseB = pair.B.Pose;
 
+        BladeClassificationTrace trace = null;
+        if (TraceClassifications)
+        {
+            if (liveTrace == null) liveTrace = new BladeClassificationTrace();
+            liveTrace.Reset(BladeShellSweep.SpecificityTieBand, sweepSettings);
+            liveTrace.LabelA = pair.A.Label;
+            liveTrace.LabelB = pair.B.Label;
+            liveTrace.Step = step;
+            trace = liveTrace;
+        }
+
         BladeFeaturePair witness;
         bool ok = BladeShellSweep.TryClosestFeaturePair(
             pair.A.Data, poseA, pair.B.Data, poseB,
-            sweepSettings, pair.Scratch, null, clock, out witness);
+            sweepSettings, pair.Scratch, null, clock, trace, out witness);
 
         if (!ok || !witness.FeatureA.IsValid || !witness.FeatureB.IsValid)
         {
             // A query that ran out of budget carries no usable witness. Rather than guess, the pair keeps
             // whatever it was last classified as; the readout still shows when that was.
+            // Published anyway, with ClassificationValid false, so an abandoned query is visible as such
+            // instead of looking like a step where no classification was attempted.
+            if (trace != null) LastClassificationTraceStep = step;
             return;
         }
 
@@ -634,6 +675,15 @@ public sealed class RqBladeTangentialSolver : MonoBehaviour
         pair.Readout.RegionB = BladeContactScenarios.RegionOf(typeB);
         pair.Readout.Scenario = BladeContactScenarios.Classify(typeA, typeB);
         pair.Readout.ClassificationValid = true;
+
+        if (trace != null)
+        {
+            // Stamped from the readout that was just written, so the trace's verdict and the solver's are
+            // the same value and cannot drift apart in analysis.
+            trace.Scenario = pair.Readout.Scenario;
+            trace.ClassificationValid = true;
+            LastClassificationTraceStep = step;
+        }
 
         // Only reached when a usable witness replaced the feature identities above. An attempt that
         // returned early left this behind, so (readingStep - ClassWrittenAtStep) is the attribution's
